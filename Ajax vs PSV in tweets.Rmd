@@ -1,0 +1,371 @@
+---
+title: "Ajax vs PSV in tweets"
+output: html_notebook
+---
+
+```{r Load libraries}
+library(NLP)
+library(tm)
+library(wordcloud)
+library(dplyr)
+library(plotrix)
+library(devtools)
+library(rJava)
+library(RWeka)
+library(qdap)
+library(dendextend)
+library(ggplot2)
+library(ggthemes)
+library(stringr)
+library(gridExtra)
+```
+
+
+```{r}
+# Import text data
+excaja <- read.csv('excaja.csv', header = TRUE, stringsAsFactors = FALSE)
+grapsv <- read.csv('grapsv.csv', header = TRUE, stringsAsFactors = FALSE)
+nacaja <- read.csv('nacaja.csv', header = TRUE, stringsAsFactors = FALSE)
+psvhee <- read.csv('psvhee.csv', header = TRUE, stringsAsFactors = FALSE)
+
+# Merge two match games
+aja_tweets <- rbind(excaja, nacaja)
+psv_tweets <- rbind(grapsv, psvhee)
+```
+
+```{r}
+dim(psv_tweets)
+dim(aja_tweets)
+```
+
+```{r Create vector source}
+aja_source <- VectorSource(aja_tweets$text)
+psv_source <- VectorSource(psv_tweets$text)
+```
+
+```{r Create corpus}
+aja_corpus <- VCorpus(aja_source)
+psv_corpus <- VCorpus(psv_source)
+```
+
+```{r Define stopwords}
+own_words <- c("excaja", "ajax", "wedstrijd", "psv", "grapsv", "de graafschap", 
+               "excelsior","wel", "weer", "net", "echt",
+               "even","eindhoven", "amsterdam", "nac", "breda", "doetinchem",
+               "heerenveen", "nacaja", "psvhee", "zoetpsvhee", "nacpraat", "livestream", 
+               "live", "eredivisie", "degraafschap", "scheerenveen", "rivboc",
+               "finalcopalibertadores", "laliga")
+#tijdens de wedstrijd van PSV tegen Heerenveen kwam het bericht binnen dat de 
+#finale van de Copa Libertadores tussen River Plate en Boca werd uitgesteld
+```
+
+```{r Preprocessing function}
+clean_corpus <- function(corpus){
+  corpus <- tm_map(corpus, removePunctuation)
+  corpus <- tm_map(corpus, content_transformer(tolower))
+  corpus <- tm_map(corpus, stripWhitespace)
+  corpus <- tm_map(corpus, removeWords, c(stopwords("nl"), own_words))
+  corpus <- tm_map(corpus, content_transformer(gsub), pattern = "scheidsrechter|scheids", replacement = "scheidsrechter")
+  corpus <- tm_map(corpus, content_transformer(gsub), pattern = "httpstco", replacement = "")
+  corpus <- tm_map(corpus, content_transformer(gsub), pattern = "ten\\shag", replacement = "tenhag")
+  corpus <- tm_map(corpus, content_transformer(gsub), pattern = "van\\bommel", replacement = "vanbommel")
+  corpus <- tm_map(corpus, content_transformer(gsub), pattern = "de\\sligt", replacement = "deligt")
+  corpus <- tm_map(corpus, content_transformer(gsub), pattern = "de\\sjong", replacement = "dejong")
+  corpus <- tm_map(corpus, content_transformer(gsub), pattern = "schone", replacement = "schöne")
+  return(corpus)
+}
+```
+
+```{r Apply preprocessing function}
+aja_clean_corp <- clean_corpus(aja_corpus)
+psv_clean_corp <- clean_corpus(psv_corpus)
+```
+
+
+```{r Create dtm}
+aja_corpus_dtm <- DocumentTermMatrix(aja_clean_corp)
+psv_corpus_dtm <- DocumentTermMatrix(psv_clean_corp)
+
+# Convert dtm to a matrix
+aja_corpus_dtm_matrix <- as.matrix(aja_corpus_dtm)
+psv_corpus_dtm_matrix <- as.matrix(psv_corpus_dtm)
+
+# Print the dimensions of the matrices
+print(dim(aja_corpus_dtm_matrix))
+print(dim(psv_corpus_dtm_matrix))
+```
+
+```{r Create tdm}
+aja_corpus_tdm <- TermDocumentMatrix(aja_clean_corp)
+psv_corpus_tdm <- TermDocumentMatrix(psv_clean_corp)
+
+# Convert tdm to a matrix
+aja_corpus_tdm_matrix <- as.matrix(aja_corpus_tdm)
+psv_corpus_tdm_matrix <- as.matrix(psv_corpus_tdm)
+
+# Print the dimensions of the matrices
+print(dim(aja_corpus_tdm_matrix))
+print(dim(psv_corpus_tdm_matrix))
+```
+
+```{r Calculate frequencies}
+# Calculate the rowSums: term_frequency
+aja_term_frequency <- rowSums(aja_corpus_tdm_matrix)
+psv_term_frequency <- rowSums(psv_corpus_tdm_matrix)
+
+# Sort term_frequency in descending order
+aja_term_frequency <- sort(aja_term_frequency, decreasing = TRUE)
+psv_term_frequency <- sort(psv_term_frequency, decreasing = TRUE)
+```
+
+
+```{r Print frequencies}
+# View the top 15 most common words for Ajax and PSV
+print(aja_term_frequency[1:15])
+print(psv_term_frequency[1:15])
+```
+
+```{r Wordcloud Ajax, fig.height=6, fig.width=6}
+# Vector of terms
+aja_terms_vec <- names(aja_term_frequency)
+
+# Create a wordcloud
+wordcloud(aja_terms_vec, aja_term_frequency, max.words = 75, colors = c('grey60', 'cornflowerblue', 'tomato'))
+```
+
+```{r Wordcloud PSV, fig.height=6, fig.width=6}
+# Vector of terms
+psv_terms_vec <- names(psv_term_frequency)
+
+# Create a wordcloud 
+wordcloud(psv_terms_vec, psv_term_frequency, max.words = 75, scale=c(4,.5), colors = c('grey60', 'cornflowerblue', 'tomato'))
+```
+
+```{r}
+# Prepare for comparison cloud
+# Create all_aja
+all_aja <- paste(aja_tweets$text, collapse = " ")
+
+# Create all_psv
+all_psv <- paste(psv_tweets$text, collapse = " ")
+
+# Create all_tweets
+all_tweets <- c(all_aja, all_psv)
+
+# Convert to a vector source
+all_tweets <- VectorSource(all_tweets)
+
+# Create all_corpus
+all_corpus <- VCorpus(all_tweets)
+
+# Clean the corpus
+all_clean <- clean_corpus(all_corpus)
+
+# Create all_tdm
+all_tdm <- TermDocumentMatrix(all_clean)
+
+# Distinct names
+colnames(all_tdm) <- c('ajax', 'psv')
+
+# Create all_m
+all_m <- as.matrix(all_tdm)
+```
+
+```{r fig.height=6, fig.width=6}
+# Create comparison cloud
+print(comparison.cloud(all_m, max.words = 50, colors = c("blue","darkgrey")))
+```
+
+```{r Create pyramid plot, fig.height = 8, fig.width = 8}
+top20_df <- all_m %>%
+  # Convert to data frame
+  as_data_frame(rownames = "word") %>%
+  # Keep rows where word appears everywhere
+  filter_all(all_vars(. > 0)) %>%
+  # Get difference in counts
+  mutate(difference = psv - ajax) %>%
+  # Keep rows with biggest difference
+  top_n(20, wt = difference) %>%
+  # Arrange by descending difference
+  arrange(desc(difference))
+
+col <- brewer.pal(4, "Blues")
+# Add more colors
+col <- colorRampPalette(col)(20)
+
+#png("pyramid_plot.png")
+
+pyramid.plot(
+  # PSV counts
+  top20_df$ajax,
+  # Ajax counts
+  top20_df$psv,
+  # Words
+  labels = top20_df$word,
+  top.labels = c("Ajax", "Words", "PSV"),
+  main = "Words in Common",
+  unit = NULL,
+  lxcol = col, rxcol = col,
+  space = 0.1,
+  gap = 30)
+
+#dev.off()
+```
+
+```{r Find word associations}
+findAssocs(aja_corpus_tdm, terms = "onana", corlimit = 0.175)
+findAssocs(aja_corpus_tdm, terms = "ziyech", corlimit = 0.15)
+findAssocs(aja_corpus_tdm, terms = "jong", corlimit = 0.175)
+findAssocs(psv_corpus_tdm, terms = "zoet", corlimit = 0.175)
+findAssocs(psv_corpus_tdm, terms = "lozano", corlimit = 0.15)
+findAssocs(psv_corpus_tdm, terms = "jong", corlimit = 0.175)
+
+#value x is the correlation of the term vector for word1 and word2
+```
+
+
+```{r}
+# Create associations
+psv_assocs <- findAssocs(psv_corpus_tdm, "zoet", 0.175)
+
+# Create associations_df
+psv_assocs_df <- list_vect2df(psv_assocs, col2 = "word", col3 = 'score')
+
+# Plot the associations_df values
+ggplot(psv_assocs_df, aes(score, word)) +
+  geom_point(size = 3) +
+  labs(title = "Woordassociaties", subtitle="Welke woorden komen vaak voor in combinatie met Zoet, de keeper van PSV?",
+        x ="Correlatie", y = "Woord") +
+  theme_economist()
+
+ggsave("zoet.png")
+```
+
+
+```{r Tokenizer functions for bigrams and trigrams}
+# Make tokenizer functions
+bi_tokenizer <- function(x) {
+  NGramTokenizer(x, Weka_control(min = 2, max = 2))
+}
+
+tri_tokenizer <- function(x) {
+  NGramTokenizer(x, Weka_control(min = 3, max = 3))
+}
+```
+
+```{r Ajax uni-bi-trigram}
+# Create ajax unigram_dtm
+aja_unigram_dtm <- DocumentTermMatrix(aja_clean_corp)
+
+# Create ajax bigram_dtm
+aja_bigram_dtm <- DocumentTermMatrix(aja_clean_corp, control = list(tokenize = bi_tokenizer))
+
+# Create ajax trigram_dtm
+aja_trigram_dtm <- DocumentTermMatrix(aja_clean_corp, control = list(tokenize = tri_tokenizer))
+```
+
+
+```{r PSV uni-bi-trigram}
+# Create psv unigram_dtm
+psv_unigram_dtm <- DocumentTermMatrix(psv_clean_corp)
+
+# Create psv bigram_dtm
+psv_bigram_dtm <- DocumentTermMatrix(psv_clean_corp, control = list(tokenize = bi_tokenizer))
+
+# Create psv trigram_dtm
+psv_trigram_dtm <- DocumentTermMatrix(psv_clean_corp, control = list(tokenize = tri_tokenizer))
+```
+
+```{r Inspect Ajax bi-trigrams}
+# Package stringr
+# Create bigram_dtm_m
+aja_bigram_dtm_m <- as.matrix(aja_bigram_dtm)
+aja_trigram_dtm_m <- as.matrix(aja_trigram_dtm)
+
+# Create freq
+aja_bi_freq <- colSums(aja_bigram_dtm_m)
+aja_tri_freq <- colSums(aja_trigram_dtm_m)
+
+aja_bi_freq <- sort(aja_bi_freq, decreasing = TRUE)
+aja_tri_freq <- sort(aja_tri_freq, decreasing = TRUE)
+
+# Create bi_words
+aja_bi_words <- names(aja_bi_freq)
+aja_tri_words <- names(aja_tri_freq)
+
+# Examine part of bi_words
+#str_subset(aja_bi_words, "frenkie")
+#str_subset(aja_tri_words, "frenkie")
+#str_subset(aja_bi_words, "blind")
+
+print(aja_bi_freq[1:20])
+print(aja_tri_freq[1:20])
+```
+
+```{r Inspect PSV bi-trigrams}
+# Package stringr
+# Create bigram_dtm_m
+psv_bigram_dtm_m <- as.matrix(psv_bigram_dtm)
+psv_trigram_dtm_m <- as.matrix(psv_trigram_dtm)
+
+# Create freq
+psv_bi_freq <- colSums(psv_bigram_dtm_m)
+psv_tri_freq <- colSums(psv_trigram_dtm_m)
+
+psv_bi_freq <- sort(psv_bi_freq, decreasing = TRUE)
+psv_tri_freq <- sort(psv_tri_freq, decreasing = TRUE)
+
+# Create bi_words
+psv_bi_words <- names(psv_bi_freq)
+psv_tri_words <- names(psv_tri_freq)
+
+# Examine part of bi_words
+#str_subset(aja_bi_words, "zoet")
+#str_subset(aja_tri_words, "zoet")
+#str_subset(psv_bi_words, "lozano")
+
+print(psv_bi_freq[1:20])
+print(psv_tri_freq[1:20])
+```
+
+```{r Frequently occurring bi-trigrams Ajax}
+findFreqTerms(aja_bigram_dtm, lowfreq=10, highfreq=Inf)
+findFreqTerms(aja_trigram_dtm, lowfreq=5, highfreq=Inf)
+```
+```{r Wordcloud bigrams Ajax}
+wordcloud(aja_bi_words, aja_bi_freq, max.words = 15)
+```
+```{r Wordcloud trigrams Ajax, fig.height=8, fig.height=8}
+wordcloud(aja_tri_words, aja_tri_freq, max.words = 15)
+```
+
+
+```{r Frequently occurring bi-trigrams PSV}
+findFreqTerms(psv_bigram_dtm, lowfreq=10, highfreq=Inf)
+findFreqTerms(psv_trigram_dtm, lowfreq=10, highfreq=Inf)
+```
+
+```{r Wordcloud bigrams PSV}
+wordcloud(psv_bi_words, psv_bi_freq, max.words = 15)
+```
+
+```{r Wordcloud trigrams PSV, fig.height=8, fig.height=8}
+wordcloud(psv_tri_words, psv_tri_freq, max.words = 15)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
